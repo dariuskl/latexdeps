@@ -1,4 +1,4 @@
-#/bin/env bash
+#!/usr/bin/env perl
 
 #   Copyright 2015 Darius Kellermann
 #
@@ -21,37 +21,53 @@
 #
 #     latexdeps <main source file>
 
+use strict;
+use warnings;
 
-if [ -z "$1" -o ! -f "$1" ]; then
-	&> echo "latexdeps: $1: No such file or directory"
-	exit 1
-fi
+sub parse_tex {
+	my $texf = shift;
+	my $wd = shift;
+	my @deps;
 
-recurse() {
-	local str
+	$texf = "$wd$texf" unless not defined $wd;
 
-	if [ -z "$1" -o ! -f "$1" ]; then
-		return
-	fi
+	open(my $texin, "<", "$texf") or die "latexdeps: $texf: $!";
 
-	while read texf; do
-		str="$str `recurse "$texf"` $texf"
-	done <<< "`sed -rn 's/.*\\include\{([^\}]*)\}.*/\1.tex/p' "$1"`"
+	while (<$texin>) {
+		if (/\\include\{([^\}]*)\}/) {
+			next if "$1.tex" ~~ @deps;
+			push(@deps, parse_tex("$1.tex", $wd), "$1.tex");
+		}
+		elsif (/\\import(\{([^\}]*)\})?\{([^\}]*)\}/) {
+			next if "$2$3" ~~ @deps;
+			push(@deps, "$2$3");
+		}
+		elsif (/\\lstinputlisting(\[[^\]]*\])?\{([^\}]*)\}/) {
+			next if "$2" ~~ @deps;
+			push(@deps, "$2");
+		}
+	}
 
-	str="$str `sed -rn '/lstinputlisting/,/\}/s/.*\]\{([^\}]*)\}.*/\1/p' "$1"`"
-	str="$str `sed -rn 's/.*import\{([^\}]*)\}\{([^\}]*)\}.*/\1\2/p' "$1"`"
-
-	echo -n $str
+	return @deps;
 }
 
-str="`recurse $1`"
+my $texf = $ARGV[0];
+my $bn;
+my $wd;
+my $base;
 
-echo -n "${1%.tex}.pdf ${1%.tex}.d: $1 "
+if ($texf =~ /((.*)\/)?(([^\/]+).tex)$/) {
+	$wd = $1;
+	$bn = $3;
+	$base = $4;
+}
+else {
+	die "latexdeps: $texf: not a valid tex filename";
+}
 
-while read dep; do
-	echo -n "$dep "
-done <<< "`echo $str | sed -n 's/ /\n/gp' | sort -u`"
+my @deps = ("$base.tex");
+push(@deps,parse_tex($bn, $wd));
 
-echo "${1%.tex}.aux"
+print "$base.pdf $base.d: @deps $base.aux\n";
 
-exit 0
+exit 0;
